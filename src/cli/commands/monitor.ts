@@ -119,6 +119,7 @@ async function monitor(...args0: MethodArgs): Promise<any> {
         'policy-path': options['policy-path'],
         'project-name': options['project-name'] || config.PROJECT_NAME,
         'isDocker': !!options.docker,
+        'prune': !!options.prune,
       };
 
       // We send results from "all-sub-projects" scanning as different Monitor objects

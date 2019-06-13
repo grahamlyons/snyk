@@ -518,6 +518,9 @@ function processAnswers(answers, policy, options) {
         // before we monitor
         options.traverseNodeModules = false;
       }
+      if (options.prune) {
+        meta.prune = true;
+      }
 
       return info.inspect(cwd, targetFile, options)
         .then(spinner(lbl))

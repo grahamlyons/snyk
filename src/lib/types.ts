@@ -84,4 +84,5 @@ export interface MonitorOptions {
   'all-sub-projects'?: boolean; // Corresponds to multiDepRoot in plugins
   'project-name'?: string;
   'print-deps'?: boolean;
+  prune?: boolean;
 }

@@ -1,3 +1,5 @@
+import * as Debug from 'debug';
+import * as depGraphLib from '@snyk/dep-graph';
 import * as snyk from '../lib';
 import {apiTokenExists} from './api-token';
 import * as request from './request';
@@ -9,6 +11,8 @@ import * as analytics from './analytics';
 import { SingleDepRootResult, MonitorError, DepTree } from './types';
 import * as projectMetadata from './project-metadata';
 import * as path from 'path';
+
+const debug = Debug('snyk');
 
 // TODO(kyegupov): clean up the type, move to snyk-cli-interface repository
 
@@ -52,9 +56,51 @@ function dropEmptyDeps(node: DepTree) {
   }
 }
 
-export async function monitor(root, meta, info: SingleDepRootResult, targetFile): Promise<any> {
+function countTotalDependenciesInTree(depTree: DepTree): number {
+  let count = 0;
+  for (const dep of _.values(depTree.dependencies || {})) {
+    if (dep) {
+      count++;
+      count += countTotalDependenciesInTree(dep);
+    }
+  }
+  return count;
+}
+
+async function pruneTree(tree: DepTree, packageManagerName: string): Promise<DepTree> {
+  debug('pruning dep tree');
+  // pruning is easiest when going from graph to tree
+  // yes, this is slow
+  const graph = await depGraphLib.legacy.depTreeToGraph(tree, packageManagerName);
+  const prunedTree: DepTree = await depGraphLib.legacy
+    .graphToDepTree(graph, packageManagerName, {prune: true}) as DepTree;
+  // make sure these survive
+  if (tree.docker) {
+    prunedTree.docker = tree.docker;
+  }
+  if (tree.packageFormatVersion) {
+    prunedTree.packageFormatVersion = tree.packageFormatVersion;
+  }
+  if (tree.targetFile) {
+    prunedTree.targetFile = tree.targetFile;
+  }
+  debug('finished pruning dep tree');
+  return prunedTree;
+}
+
+export async function monitor(root: string, meta: any, info: SingleDepRootResult, targetFile?: string): Promise<any> {
   apiTokenExists();
-  const pkg = info.package;
+  let prePruneDepCount;
+  if (meta.prune) {
+    debug('prune used, counting total dependencies');
+    prePruneDepCount = countTotalDependenciesInTree(info.package);
+    analytics.add('prePruneDepCount', prePruneDepCount);
+    debug('total dependencies: %d', prePruneDepCount);
+  }
+  const pkg = meta.prune
+    ? await pruneTree(info.package, meta.packageManager)
+    : info.package;
+
   const pluginMeta = info.plugin;
   let policy;
   const policyPath = meta['policy-path'] || root;
@@ -98,6 +144,7 @@ export async function monitor(root, meta, info: SingleDepRootResult, targetFile)
           dockerBaseImage: pkg.docker ? pkg.docker.baseImage : undefined,
           dockerfileLayers: pkg.docker ? pkg.docker.dockerfileLayers : undefined,
           projectName: meta['project-name'],
+          prePruneDepCount, // undefined unless 'prune' is used
         },
         policy: policy ? policy.toString() : undefined,
         package: pkg,
